@@ -1,0 +1,14 @@
+[Unit]
+Description=Prometheus fritzbox exporter
+After=network.target
+Wants=network.target
+
+[Service]
+User=fritzbox_exporter
+Group=fritzbox_exporter
+ExecStart=/usr/local/bin/fritzbox_exporter
+Type=simple
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

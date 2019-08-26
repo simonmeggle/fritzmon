@@ -1,0 +1,162 @@
+---
+- hosts: all
+  vars:
+    ntp_manage_config: True
+    network_provider: nm
+    ntp_timezone: Europe/Berlin
+  roles:
+    - ansible-role-ntp
+
+
+- hosts: all
+  tasks: 
+    - name: Dashboard Ordner
+      file: 
+        path: /var/grafana/dashboards
+        state: directory 
+        mode: 0755
+    - name: Synce Dashboards
+      synchronize: 
+        src: dashboards/
+        dest: /var/grafana/dashboards/
+
+- hosts: all
+  tasks: 
+    - name: Create User
+      user:
+        name: fritzbox_exporter
+
+- hosts: all
+  # become: yes
+  # become_user: fritzbox_exporter
+  vars:
+    # GOPATH: /home/fritzbox_exporter/go
+    # GOROOT: /home/fritzbox_exporter/gobin
+    golang_shell_profile: /root/.bashrc
+  roles:
+    - fubarhouse.golang
+
+- hosts: all
+  # become: yes
+  # become_user: fritzbox_exporter
+  tasks: 
+    - name: Download fritzbox_exporter
+      command: go get github.com/ndecker/fritzbox_exporter/
+    - name: Install fritzbox_exporter
+      command: go install
+      args: 
+        chdir: "/root/go/src/github.com/ndecker/fritzbox_exporter"
+    - name: Kopiere fritzbox_exporter in /usr/local/bin
+      copy: 
+        src: "/root/go/bin/fritzbox_exporter"
+        dest: "/usr/local/bin/"
+        mode: 0775
+        owner: root
+        group: root
+
+- hosts: all
+  tasks: 
+    - name: Install fritzbox_exporter systemd service
+      copy: 
+        src: fritzbox_exporter.service
+        dest: "/etc/systemd/system/fritzbox_exporter.service"
+        owner: root
+        group: root
+        mode: 0644
+    - name: Enable fritzbox_exporter systemd 
+      systemd:
+        name: "fritzbox_exporter.service" 
+        enabled: yes
+        state: restarted
+        daemon_reload: yes
+
+- hosts: all
+  name: Prometheus/Pushgateway/NodeExporter
+  roles:
+    - cloudalchemy.prometheus
+    - cloudalchemy.pushgateway
+    - cloudalchemy.grafana
+    - cloudalchemy.blackbox-exporter
+  vars:
+    prometheus_web_listen_address: "0.0.0.0:9090"
+    prometheus_scrape_configs:
+      - job_name: "prometheus"
+        metrics_path: "/metrics"
+        static_configs:
+          - targets:
+            - "{{ ansible_host }}:9090"
+      - job_name: "pushgateway"
+        metrics_path: "/metrics"
+        static_configs:
+          - targets:
+            - "{{ ansible_host }}:9091"            
+      - job_name: "fritzbox-exporter"
+        metrics_path: "/metrics"
+        static_configs:
+          - targets:
+            - "{{ ansible_host }}:9133"            
+      - job_name: "blackbox-exporter"
+        metrics_path: /probe
+        params: 
+          module: [http_2xx]
+        scrape_interval: 15s
+        scrape_timeout: 10s
+        static_configs:
+          - targets:
+            - https://www.google.com
+            - https://www.amazon.de
+            - https://www.sueddeutsche.de
+            - https://www.zalando.de
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: "{{ ansible_host }}:9115"            
+    grafana_security: { admin_user: admin, admin_password: "admin" }
+    grafana_datasources:
+      - name: myprometheus
+        type: prometheus
+        access: proxy
+        url: 'http://{{ prometheus_web_listen_address }}'
+        basicAuth: false
+    grafana_dashboards:
+      # blackbox exporter dashboard
+      - dashboard_id: 7587
+        revision_id: 3
+        datasource: myprometheus
+    grafana_dashboards_dir: /var/grafana/dashboards/
+    blackbox_exporter_configuration_modules: 
+      http_2xx: 
+        prober: http
+        timeout: 5s
+        http:
+          no_follow_redirects: false
+          fail_if_ssl: false
+          fail_if_not_ssl: false
+          preferred_ip_protocol: "ip4"
+
+
+- hosts: all
+  tasks: 
+    - name: Hole Speedtest-Exporter
+      get_url: 
+        url: https://raw.githubusercontent.com/RichiH/speedtest_exporter/master/speedtest_exporter.pl
+        dest: /usr/local/bin/
+    - name: Make exec
+      file: 
+        path: /usr/local/bin/speedtest_exporter.pl 
+        owner: root
+        group: root
+        mode: 0775
+    - name: Comment DataDumper
+      replace: 
+        path: /usr/local/bin/speedtest_exporter.pl 
+        regexp: 'use Data::Dumper;'
+        replace: '#use Data::Dumper;'
+    - name: cronjob für Speedtest-Exporter
+      cron: 
+        name: "Speedtest-Exporter"
+        minute: "*/15"
+        job: "/usr/local/bin/speedtest_exporter.pl"

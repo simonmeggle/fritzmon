@@ -1,0 +1,13 @@
+- src: https://github.com/geerlingguy/ansible-role-ntp
+  version: 1.6.2
+
+- src: https://github.com/insspb/ansible-role-hostname
+  version: v3.0
+
+#https://github.com/cloudalchemy/ansible-prometheus
+- src: cloudalchemy.prometheus
+- src: cloudalchemy.pushgateway
+- src: cloudalchemy.node-exporter
+- src: fubarhouse.golang
+- src: cloudalchemy.grafana
+- src: cloudalchemy.blackbox-exporter
